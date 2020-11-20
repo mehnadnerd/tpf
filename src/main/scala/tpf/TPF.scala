@@ -35,17 +35,18 @@ object DecodedPosit {
     val clz = Util.clz( rrest)
     val clo = Util.clz(~rrest)
     val start = Wire(UInt(unsignedBitLength(p.size - 1).W))
+    printf("%b %x", p.bits, start)
 
     when (loz) {
       // leading digit one
       dp.regime := clo -& 1.S
-      start := clo.asUInt()
+      start := clo.asUInt() +& 1.U
     } .otherwise {
       dp.regime := 0.S - clz
-      start := clz.asUInt()
+      start := clz.asUInt() +& 1.U
     }
 
-    val zrrest: UInt = Cat(0.U(100.W), rrest) // slapping zeroes in front, 100 should be replaced with something better
+    val zrrest: UInt = Cat(0.U(p.size.W), rrest)
     val expbits = (zrrest >> start)(p.es - 1, 0)
     dp.exp := Reverse(expbits)
     val fracbits = (zrrest >> (start +& p.es.U))(p.size - 1 - 2 - p.es - 1, 0)
