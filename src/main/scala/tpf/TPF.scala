@@ -4,7 +4,6 @@ package tpf
 
 import chisel3._
 import chisel3.util._
-import firrtl.transforms.DontTouchAnnotation
 
 class Posit(val size: Int = 32, val es: Int = 2) extends Bundle {
   val bits = UInt(size.W)
@@ -20,10 +19,14 @@ class DecodedPosit(val size: Int = 32, val es: Int = 2) extends Bundle {
   val regime = SInt(signedBitLength(size - 1).W)
   val exp = UInt(es.W)
   val frac = UInt((size - 1 - 2 - es).W)
+  val isZero = Bool()
+  val isInf = Bool()
+  val isSpe = isZero | isInf
 }
 
 object DecodedPosit {
   // sign * useed ^ regime * 2 ^ exp * 1.frac
+  // used = 2^(2^es)
   def apply(p: Posit): DecodedPosit = {
     val dp = Wire(new DecodedPosit(p.size, p.es))
     dp.sign := p.bits(p.size - 1)
@@ -52,6 +55,13 @@ object DecodedPosit {
     val fracbits = (zrrest >> (start +& p.es.U)) (p.size - 1 - 2 - p.es - 1, 0)
     dp.frac := Reverse(fracbits)
 
+    dp.isZero := false.B
+    dp.isInf := false.B
+    when (p.bits(p.size - 2, 0) === 0.U) {
+      // special
+      dp.isZero := ~p.bits(p.size - 1)
+      dp.isInf := p.bits(p.size - 1)
+    }
 
     dp
   }
@@ -61,7 +71,7 @@ object DecodedPosit {
   * Dot product calculator. Takes in two posits, and accumulates them in a quire.
   *
   */
-class TPF(size: Int = 32, es: Int = 2, quire: Int = 512) extends Module {
+class TPF(size: Int = 32, es: Int = 2) extends Module {
   val io = IO(new Bundle {
     val in_ready = Output(Bool())
     val in_valid = Input(Bool())
@@ -101,6 +111,8 @@ class TPF(size: Int = 32, es: Int = 2, quire: Int = 512) extends Module {
   val regime_sum = RegNext(x_dec.regime +& y_dec.regime)
   val exp_sum = RegNext(x_dec.exp +& y_dec.exp)
   val sign_xor = RegNext(x_dec.sign ^ y_dec.sign)
+  val mulzero = RegNext(x_dec.isZero | y_dec.isZero)
+  val mulinf = RegNext(x_dec.isInf | y_dec.isInf) // could have both zero and inf, undefined output
 
   // stage 3: fixup
   // need to check whether exp overflows into regime
@@ -140,17 +152,36 @@ class TPF(size: Int = 32, es: Int = 2, quire: Int = 512) extends Module {
   val mulout_regime = RegNext(regime_adj)
   val mulout_exp = RegNext(exp_adj)
   val mulout_frac = RegNext(right_bits_carried)
+  val mulout_zero = RegNext(mulzero)
+  val mulout_inf = RegNext(mulinf)
 
   dontTouch(mulout_sign)
   dontTouch(mulout_regime)
   dontTouch(mulout_exp)
   dontTouch(mulout_frac)
-
-  //TODO: special value detection
+  dontTouch(mulout_zero)
+  dontTouch(mulout_inf)
 
   // not doing normalising here
   // stage 4: add
+  // used ^ (4n - 8)
+  // used = 2^(2^es)
+  // quire size = 2^2^es^(4 * size - 8) + 2
+  val minregime = (size - 1) // actual is negative, but we would subtract it
+  assert(mulout_regime +& minregime.S >= 0.S)
+  val biasedregime = (mulout_regime +& minregime.S).asUInt() // is positive at this point
+  val expanded_exp = Cat(biasedregime, mulout_exp) // note: biased
+  // max regime is 30,
 
+  val quiresize = 2 * es * (4 * size - 8) + 2 // TODO: need more?
+  val quiresize2 = (1 + (size - 1 - 2 - es)) + (1 << 2)
+  val quire = RegInit(0.U(quiresize.W))
+  val quireInf = RegInit(0.U)
+
+  val fracaligned = Wire(UInt(1.W))
+  val frac = Cat(1.U, mulout_frac)
+
+  // regime are basically extra exp bits here (actually before as well)
 
 
   io.out_valid := DontCare
