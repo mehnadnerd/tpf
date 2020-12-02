@@ -14,6 +14,19 @@ class Posit(val size: Int = 32, val es: Int = 2) extends Bundle {
   // fraction, max bits = size - 1 - 2 - es
 }
 
+object Posit {
+  def apply(dp: DecodedPosit): Posit = {
+    val p = Wire(new Posit(dp.size, dp.es))
+    val expfrac = Cat(dp.exp, dp.frac)
+    val regime = 0.U
+    val regimebits = 0.U
+    val regimeexpfrac = Wire(UInt((dp.size - 1).W))
+    regimeexpfrac := regime | Cat(expfrac >> regimebits)
+    p.bits := Cat(dp.sign, regimeexpfrac)
+    p
+  }
+}
+
 class DecodedPosit(val size: Int = 32, val es: Int = 2) extends Bundle {
   val sign = Bool()
   val regime = SInt(signedBitLength(size - 1).W)
@@ -21,7 +34,8 @@ class DecodedPosit(val size: Int = 32, val es: Int = 2) extends Bundle {
   val frac = UInt((size - 1 - 2 - es).W)
   val isZero = Bool()
   val isInf = Bool()
-  val isSpe = isZero | isInf
+
+  val fracsize: Int = size - 1 - 2 - es
 }
 
 object DecodedPosit {
@@ -37,8 +51,10 @@ object DecodedPosit {
 
     val clz = Util.clz(rrest)
     val clo = Util.clz(~rrest)
-    val start = Wire(UInt(unsignedBitLength(p.size - 1).W))
-    printf("%b %x", p.bits, start)
+    val start = Wire(UInt(unsignedBitLength(p.size).W))
+    //printf("%b clz: %x clo: %x", p.bits, clz, clo)
+    //dontTouch(clz)
+    //dontTouch(clo)
 
     when(loz) {
       // leading digit one
@@ -57,13 +73,30 @@ object DecodedPosit {
 
     dp.isZero := false.B
     dp.isInf := false.B
-    when (p.bits(p.size - 2, 0) === 0.U) {
+    when(p.bits(p.size - 2, 0) === 0.U) {
       // special
       dp.isZero := ~p.bits(p.size - 1)
       dp.isInf := p.bits(p.size - 1)
     }
 
     dp
+  }
+
+  implicit class AddMethodsToDecodedPosit(target: DecodedPosit) {
+    def isSpe: Bool = {
+      target.isZero | target.isInf
+    }
+
+    def regime_biased: UInt = {
+      assert(target.regime +& (target.size - 2).S >= 0.S)
+      (target.regime +& (target.size - 2).S).asUInt()
+    } // max value is 2 * (width - 2) - 1 => 2 * width - 5
+
+    def regime_exp: UInt = {
+      Cat(target.regime_biased, target.exp)
+    } // max value is maxregime << es + maxexp
+    // 2 * width * 2^es - 5 * 2^es + 2^es - 1
+    // 2^es * (2 * width - 4) - 1
   }
 }
 
@@ -82,20 +115,20 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
     val out_data = Output(UInt(size.W))
   })
 
-  val in_readyctr = Counter(4)
+  val in_readyctr = Counter(1)
   in_readyctr.inc() // always inc
   io.in_ready := in_readyctr.value === 0.U // only every 4 cycles, so have enough time to accum
 
   val x = Reg(new Posit(size, es))
   val y = Reg(new Posit(size, es))
-  val xyvalid = RegNext(io.in_valid && io.in_ready)
+  val xyvalid = RegNext(io.in_valid && io.in_ready, init = false.B)
   when(io.in_valid && io.in_ready) {
     x.bits := io.in_data1
     y.bits := io.in_data2
   }
 
   // stage 1: decode
-  val decvalid = RegNext(xyvalid)
+  val decvalid = RegNext(xyvalid, init = false.B)
   val x_dec = Reg(new DecodedPosit(size, es))
   val y_dec = Reg(new DecodedPosit(size, es))
   x_dec := DecodedPosit(x)
@@ -106,10 +139,10 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
   dontTouch(y_dec)
 
   // stage 2: multiply
-  val mulvalid = RegNext(decvalid)
+  val mulvalid = RegNext(decvalid, init = false.B)
   val frac_prod = RegNext(Cat(1.U, x_dec.frac) * Cat(1.U, y_dec.frac)) // the 1.U are implicit one
-  val regime_sum = RegNext(x_dec.regime +& y_dec.regime)
-  val exp_sum = RegNext(x_dec.exp +& y_dec.exp)
+  val regimeexp_sum = RegNext(x_dec.regime_exp +& y_dec.regime_exp) // note: biased
+  // max value is 2 * (2^es * (2 * width - 2) - 1)
   val sign_xor = RegNext(x_dec.sign ^ y_dec.sign)
   val mulzero = RegNext(x_dec.isZero | y_dec.isZero)
   val mulinf = RegNext(x_dec.isInf | y_dec.isInf) // could have both zero and inf, undefined output
@@ -123,67 +156,90 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
   // top 2 bits, to the left of the binary point
   val right_bits = frac_prod(fracprodwidth - 3, 0) // bits to right of binary point
 
-  val exp_carried = exp_sum +& left_bits(1)
+  val regimeexp_carried = regimeexp_sum +& left_bits(1)
+  // max value is 2 * (2^es * (2 * width - 2) - 1) + 1
   //val left_bits_carried = Wire(UInt(1.W)) // not needed, always one
   val right_bits_carried = Wire(UInt())
-  when (left_bits(1)) {
+  when(left_bits(1)) {
     //left_bits_carried := left_bits(1)
     right_bits_carried := Cat(left_bits(0), right_bits)
-  } .otherwise {
+  }.otherwise {
     //left_bits_carried := left_bits(0)
     right_bits_carried := Cat(right_bits, 0.U(1.W))
   }
+  val frac_sint = Wire(SInt())
+  frac_sint := Cat(1.U(2.W), right_bits_carried).asSInt()
 
-  val regime_adj = Wire(SInt())
-  val exp_adj = Wire(UInt(es.W))
-  val max_exp = 3.U // TODO: not generic on es
-  when (exp_carried >= max_exp) {
-    // can't be >= 2 * max_exp, so this is safe
-    assert(exp_carried - max_exp < max_exp)
-    regime_adj := regime_sum +& 1.S
-    exp_adj := exp_carried - max_exp
-  } .otherwise {
-    regime_adj := regime_sum
-    exp_adj := exp_carried
-  }
+  val frac_signed = Wire(SInt())
+  frac_signed := Mux(sign_xor, 0.S, Mux(sign_xor, 0.S -& frac_sint, frac_sint))
 
-  val mulout_valid = RegNext(mulvalid)
-  val mulout_sign = RegNext(sign_xor)
-  val mulout_regime = RegNext(regime_adj)
-  val mulout_exp = RegNext(exp_adj)
-  val mulout_frac = RegNext(right_bits_carried)
-  val mulout_zero = RegNext(mulzero)
+  val mulout_valid = RegNext(mulvalid, init = false.B)
+  val mulout_regimeexp = RegNext(regimeexp_carried)
+  val mulout_frac = RegNext(frac_signed)
   val mulout_inf = RegNext(mulinf)
 
-  dontTouch(mulout_sign)
-  dontTouch(mulout_regime)
-  dontTouch(mulout_exp)
+  dontTouch(mulout_regimeexp)
   dontTouch(mulout_frac)
-  dontTouch(mulout_zero)
   dontTouch(mulout_inf)
 
-  // not doing normalising here
-  // stage 4: add
-  // used ^ (4n - 8)
-  // used = 2^(2^es)
-  // quire size = 2^2^es^(4 * size - 8) + 2
-  val minregime = (size - 1) // actual is negative, but we would subtract it
-  assert(mulout_regime +& minregime.S >= 0.S)
-  val biasedregime = (mulout_regime +& minregime.S).asUInt() // is positive at this point
-  val expanded_exp = Cat(biasedregime, mulout_exp) // note: biased
-  // max regime is 30,
+  val quiresize = 2 * es * (4 * size - 8) + 2 // looks right size
+  val bitscanignore = 2 * (size - 1 - 2 - es) + 1 // these bits are always zero in fracaligned, so we don't have them
+   // is is the size of mulout_frac?
+  val quire = RegInit(0.S(quiresize.W))
+  //val quireInf = RegInit(0.U) // Disabled
+  dontTouch(quire)
+  //dontTouch(quireInf)
 
-  val quiresize = 2 * es * (4 * size - 8) + 2 // TODO: need more?
-  val quiresize2 = (1 + (size - 1 - 2 - es)) + (1 << 2)
-  val quire = RegInit(0.U(quiresize.W))
-  val quireInf = RegInit(0.U)
+  // stage 4: align
+  val fracaligned = Reg(SInt(quiresize.W))
+  val alignvalid = RegNext(mulout_valid, init = false.B)
+  //val frac = Cat(1.U, mulout_frac) // done earlier to make signed
+  fracaligned := (mulout_frac << mulout_regimeexp) >> bitscanignore // TODO: Check
+  dontTouch(fracaligned)
 
-  val fracaligned = Wire(UInt(1.W))
-  val frac = Cat(1.U, mulout_frac)
+  // stage 5? add - align and this may need to take more cycles
+  val sum = Wire(SInt())
+  sum := quire +& fracaligned
+  when(alignvalid) {
+    //quireInf := quireInf | sum(quiresize) // if top bit is set, we overflow
+    quire := sum
+  }
 
-  // regime are basically extra exp bits here (actually before as well)
+  // stage x: pack quire, round, &c
+  val done = RegNext(RegNext(RegNext(RegNext(RegNext(RegNext(io.in_done),
+    init = false.B), init = false.B), init = false.B), init = false.B), init = false.B) // delayed by 6 cycles
+  val quireAbs =  RegInit(0.S(quiresize.W))
+  quireAbs := Mux(quire(quiresize - 1), 0.S - quire, quire)
+  val quireSign = RegNext(quire(quiresize - 1))
+
+  // stage x+1
+  val packValid = RegNext(done, init = false.B)
+  val quireEncode = Wire(new DecodedPosit(size, es))
+  quireEncode.sign := quireSign
+  quireEncode.isZero := quireAbs === 0.S
+  quireEncode.isInf := false.B
+
+  val quireAbsReverse = Reverse(quireAbs.asUInt())
+  val firstOne = Util.clz(quireAbsReverse).asUInt()
+  val fracbits = (quireAbsReverse >> firstOne)(quireEncode.fracsize, 1) // start with 1 to ignore implicit 1
+  quireEncode.frac := Reverse(fracbits)
+
+  val regimeexpbiased = (quiresize - 1).U - firstOne // TODO: what is max value?
+  val exp = regimeexpbiased(es - 1, 0) // TODO: is this correct - should be
+  val regime = Cat(0.U(1.W), regimeexpbiased >> es).asSInt() -& (2 * size - 4).S
+  quireEncode.exp := exp
+  quireEncode.regime := regime
+
+  //TODO: make sure regime is capped at +- max regime
+  //TODO: rounding on frac -- careful on not double rounding
 
 
-  io.out_valid := DontCare
-  io.out_data := DontCare
+  dontTouch(quireEncode)
+
+  val quirePositEncode = Posit(quireEncode)
+  io.out_valid := quirePositEncode.bits
+  io.out_data := packValid
+
+  val debughelp = DecodedPosit(quirePositEncode)
+  dontTouch(debughelp)
 }
