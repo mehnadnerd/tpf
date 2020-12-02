@@ -18,9 +18,17 @@ object Posit {
   def apply(dp: DecodedPosit): Posit = {
     val p = Wire(new Posit(dp.size, dp.es))
     val expfrac = Cat(dp.exp, dp.frac)
-    val regime = 0.U
-    val regimebits = 0.U
+    val regime = Wire(UInt((dp.size - 1).W))
+    val regimebits = Wire(UInt(unsignedBitLength(dp.size - 1).W))
     val regimeexpfrac = Wire(UInt((dp.size - 1).W))
+    when (dp.regime >= 0.S) {
+      regimebits := dp.regime.asUInt()
+      regime := (Cat(1.U(1.W), 0.U((dp.size - 2).W)).asSInt() >> (dp.regime).asUInt()).asUInt()
+    } .otherwise {
+      regimebits := (0.S - dp.regime).asUInt()
+      regime := Cat(1.U(1.W), 0.U((dp.size - 2).W)).asUInt() >> (0.S - dp.regime).asUInt()
+    }
+
     regimeexpfrac := regime | Cat(expfrac >> regimebits)
     p.bits := Cat(dp.sign, regimeexpfrac)
     p
@@ -194,7 +202,7 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
   val fracaligned = Reg(SInt(quiresize.W))
   val alignvalid = RegNext(mulout_valid, init = false.B)
   //val frac = Cat(1.U, mulout_frac) // done earlier to make signed
-  fracaligned := (mulout_frac << mulout_regimeexp) >> bitscanignore // TODO: Check
+  fracaligned := (mulout_frac << mulout_regimeexp) >> bitscanignore
   dontTouch(fracaligned)
 
   // stage 5? add - align and this may need to take more cycles
@@ -224,13 +232,14 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
   val fracbits = (quireAbsReverse >> firstOne)(quireEncode.fracsize, 1) // start with 1 to ignore implicit 1
   quireEncode.frac := Reverse(fracbits)
 
-  val regimeexpbiased = (quiresize - 1).U - firstOne // TODO: what is max value?
-  val exp = regimeexpbiased(es - 1, 0) // TODO: is this correct - should be
-  val regime = Cat(0.U(1.W), regimeexpbiased >> es).asSInt() -& (2 * size - 4).S
+  val regimeexpbiased = (quiresize - 1).U - firstOne
+  val exp = regimeexpbiased(es - 1, 0)
+  val regimeraw = Cat(0.U(1.W), regimeexpbiased >> es).asSInt() -& (2 * size - 4).S
+  val regime = Mux(regimeraw > (size - 2).S, (size - 2).S, Mux(regimeraw < (-(size - 2)).S, (-(size - 2)).S, regimeraw))
+  // capping regime
   quireEncode.exp := exp
-  quireEncode.regime := regime
+  quireEncode.regime := regimeraw
 
-  //TODO: make sure regime is capped at +- max regime
   //TODO: rounding on frac -- careful on not double rounding
 
 
