@@ -21,10 +21,10 @@ object Posit {
     val regime = Wire(UInt((dp.size - 1).W))
     val regimebits = Wire(UInt(unsignedBitLength(dp.size - 1).W))
     val regimeexpfrac = Wire(UInt((dp.size - 1).W))
-    when (dp.regime >= 0.S) {
+    when(dp.regime >= 0.S) {
       regimebits := dp.regime.asUInt()
       regime := (Cat(1.U(1.W), 0.U((dp.size - 2).W)).asSInt() >> (dp.regime).asUInt()).asUInt()
-    } .otherwise {
+    }.otherwise {
       regimebits := (0.S - dp.regime).asUInt()
       regime := Cat(1.U(1.W), 0.U((dp.size - 2).W)).asUInt() >> (0.S - dp.regime).asUInt()
     }
@@ -106,6 +106,7 @@ object DecodedPosit {
     // 2 * width * 2^es - 5 * 2^es + 2^es - 1
     // 2^es * (2 * width - 4) - 1
   }
+
 }
 
 /**
@@ -156,9 +157,7 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
   val mulinf = RegNext(x_dec.isInf | y_dec.isInf) // could have both zero and inf, undefined output
 
   // stage 3: fixup
-  // need to check whether exp overflows into regime
-  // also need to see whether frac causes change in exp
-  // also round frac -- careful not to double round
+  // need to check whether exp overflows into regime/exp
   val fracprodwidth = 2 * (1 + (size - 1 - 2 - es))
   val left_bits = frac_prod(fracprodwidth - 1, fracprodwidth - 2)
   // top 2 bits, to the left of the binary point
@@ -166,20 +165,17 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
 
   val regimeexp_carried = regimeexp_sum +& left_bits(1)
   // max value is 2 * (2^es * (2 * width - 2) - 1) + 1
-  //val left_bits_carried = Wire(UInt(1.W)) // not needed, always one
   val right_bits_carried = Wire(UInt())
   when(left_bits(1)) {
-    //left_bits_carried := left_bits(1)
     right_bits_carried := Cat(left_bits(0), right_bits)
   }.otherwise {
-    //left_bits_carried := left_bits(0)
     right_bits_carried := Cat(right_bits, 0.U(1.W))
   }
   val frac_sint = Wire(SInt())
   frac_sint := Cat(1.U(2.W), right_bits_carried).asSInt()
 
   val frac_signed = Wire(SInt())
-  frac_signed := Mux(sign_xor, 0.S, Mux(sign_xor, 0.S -& frac_sint, frac_sint))
+  frac_signed := Mux(sign_xor, 0.S -& frac_sint, frac_sint)
 
   val mulout_valid = RegNext(mulvalid, init = false.B)
   val mulout_regimeexp = RegNext(regimeexp_carried)
@@ -192,7 +188,6 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
 
   val quiresize = 2 * es * (4 * size - 8) + 2 // looks right size
   val bitscanignore = 2 * (size - 1 - 2 - es) + 1 // these bits are always zero in fracaligned, so we don't have them
-   // is is the size of mulout_frac?
   val quire = RegInit(0.S(quiresize.W))
   //val quireInf = RegInit(0.U) // Disabled
   dontTouch(quire)
@@ -213,42 +208,71 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
     quire := sum
   }
 
-  // stage x: pack quire, round, &c
+  // stage x: abs, sign
   val done = RegNext(RegNext(RegNext(RegNext(RegNext(RegNext(io.in_done),
     init = false.B), init = false.B), init = false.B), init = false.B), init = false.B) // delayed by 6 cycles
-  val quireAbs =  RegInit(0.S(quiresize.W))
+  val quireAbs = RegInit(0.S(quiresize.W))
   quireAbs := Mux(quire(quiresize - 1), 0.S - quire, quire)
   val quireSign = RegNext(quire(quiresize - 1))
 
-  // stage x+1
-  val packValid = RegNext(done, init = false.B)
-  val quireEncode = Wire(new DecodedPosit(size, es))
-  quireEncode.sign := quireSign
-  quireEncode.isZero := quireAbs === 0.S
-  quireEncode.isInf := false.B
+  // stage x+1: shift out
 
   val quireAbsReverse = Reverse(quireAbs.asUInt())
   val firstOne = Util.clz(quireAbsReverse).asUInt()
-  val fracbits = (quireAbsReverse >> firstOne)(quireEncode.fracsize, 1) // start with 1 to ignore implicit 1
-  quireEncode.frac := Reverse(fracbits)
+  val fracbits = (quireAbsReverse >> firstOne) (x_dec.fracsize + 1, 1)
+  // start with 1 to ignore implicit 1
+  // add 1 so have extra bits for rounding
+
+  val moreBits = (quireAbsReverse >> firstOne)(quiresize - 1, x_dec.fracsize + 2).orR
 
   val regimeexpbiased = (quiresize - 1).U - firstOne
   val exp = regimeexpbiased(es - 1, 0)
   val regimeraw = Cat(0.U(1.W), regimeexpbiased >> es).asSInt() -& (2 * size - 4).S
-  val regime = Mux(regimeraw > (size - 2).S, (size - 2).S, Mux(regimeraw < (-(size - 2)).S, (-(size - 2)).S, regimeraw))
-  // capping regime
-  quireEncode.exp := exp
-  quireEncode.regime := regimeraw
 
-  //TODO: rounding on frac -- careful on not double rounding
+  val shiftValid = RegNext(done, init = false.B)
+  val shiftFrac = RegNext(Reverse(fracbits))
+  val shiftExp = RegNext(exp)
+  val shiftRegime = RegNext(regimeraw)
+  val shiftZero = RegNext(quireAbs === 0.S)
+  val shiftSign = RegNext(quireSign)
+  val shiftMore = RegNext(moreBits)
 
+  // stage x+2: round and cap, encode
 
-  dontTouch(quireEncode)
+  val roundValid = RegNext(shiftValid, init = false.B)
 
-  val quirePositEncode = Posit(quireEncode)
-  io.out_valid := quirePositEncode.bits
-  io.out_data := packValid
+  val regimecapped = Mux(shiftRegime > (size - 2).S, (size - 2).S,
+    Mux(shiftRegime < (-(size - 2)).S, (-(size - 2)).S, shiftRegime))
+  val expfrac = Wire(UInt((size - 0).W))
+  expfrac := Cat(shiftExp, shiftFrac) // note: last bit is only for rounding
+  val regimeencoded = Wire(UInt((size - 1).W))
+  val regimebitlength = Wire(UInt(unsignedBitLength(size - 1).W)) // n.b. not actual bit length
+  val regimeexpfrac = Wire(UInt((size - 1).W))
+  val absregimecapped = Mux(shiftRegime >= 0.S, regimecapped.asUInt(), (0.S - regimecapped).asUInt())
+  regimebitlength := absregimecapped
+  when(shiftRegime >= 0.S) {
+    regimeencoded := (Cat(1.U(1.W), 0.U((size - 2).W)).asSInt() >> (regimecapped).asUInt()).asUInt()
+  }.otherwise {
+    regimeencoded := Cat(1.U(1.W), 0.U((size - 2).W)).asUInt() >> (0.S - regimecapped).asUInt()
+  }
+  val expfracMore = (Reverse(expfrac) << regimebitlength)(2 * size - 2, size).orR
+  val moreMore = shiftMore | expfracMore
+  val expfracshifted = expfrac >> regimebitlength
+  val nextbit = expfracshifted(0)
+  regimeexpfrac := regimeencoded | expfracshifted(size - 1, 1) // last bit is nextbit, so don't take it
+  val regimeexpfracrounded = Mux(nextbit & (moreMore | regimeexpfrac(0)) & !regimeexpfrac.andR,
+    regimeexpfrac +% 1.U ,regimeexpfrac)
+  val refr = regimeexpfracrounded
 
-  val debughelp = DecodedPosit(quirePositEncode)
+  val signedrefr = Cat(shiftSign, Mux(shiftSign, Cat(~refr) +% 1.U, refr))
+  // stage x+3: output
+  val outlatch = RegNext(signedrefr)
+  val outvalid = RegNext(roundValid, init = false.B)
+  io.out_valid := outvalid
+  io.out_data := outlatch
+
+  val debugp = Wire(new Posit(size, es))
+  debugp.bits := outlatch
+  val debughelp = DecodedPosit(debugp)
   dontTouch(debughelp)
 }
