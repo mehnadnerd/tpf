@@ -223,7 +223,7 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
   // start with 1 to ignore implicit 1
   // add 1 so have extra bits for rounding
 
-  val moreBits = (quireAbsReverse >> firstOne)(quiresize - 1, x_dec.fracsize + 2).orR
+  val moreBits = (quireAbsReverse >> firstOne)(quiresize - 1, x_dec.fracsize + 2)
 
   val regimeexpbiased = (quiresize - 1).U - firstOne
   val exp = regimeexpbiased(es - 1, 0)
@@ -256,7 +256,7 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
     regimeencoded := Cat(1.U(1.W), 0.U((size - 2).W)).asUInt() >> (0.S - regimecapped).asUInt()
   }
   val expfracMore = (Reverse(expfrac) << regimebitlength)(2 * size - 2, size).orR
-  val moreMore = shiftMore | expfracMore
+  val moreMore = shiftMore.orR | expfracMore
   val expfracshifted = expfrac >> regimebitlength
   val nextbit = expfracshifted(0)
   regimeexpfrac := regimeencoded | expfracshifted(size - 1, 1) // last bit is nextbit, so don't take it
