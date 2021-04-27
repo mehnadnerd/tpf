@@ -181,10 +181,12 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
   val mulout_regimeexp = RegNext(regimeexp_carried)
   val mulout_frac = RegNext(frac_signed)
   val mulout_inf = RegNext(mulinf)
+  val mulout_zero = RegNext(mulzero)
 
   dontTouch(mulout_regimeexp)
   dontTouch(mulout_frac)
   dontTouch(mulout_inf)
+  dontTouch(mulout_zero)
 
   val quiresize = 2 * es * (4 * size - 8) + 2 // looks right size
   val bitscanignore = 2 * (size - 1 - 2 - es) + 1 // these bits are always zero in fracaligned, so we don't have them
@@ -197,7 +199,7 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
   val fracaligned = Reg(SInt(quiresize.W))
   val alignvalid = RegNext(mulout_valid, init = false.B)
   //val frac = Cat(1.U, mulout_frac) // done earlier to make signed
-  fracaligned := (mulout_frac << mulout_regimeexp) >> bitscanignore
+  fracaligned := Mux(mulout_zero, 0.S, (mulout_frac << mulout_regimeexp) >> bitscanignore)
   dontTouch(fracaligned)
 
   // stage 5? add - align and this may need to take more cycles
