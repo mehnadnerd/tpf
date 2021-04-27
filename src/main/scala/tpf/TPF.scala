@@ -96,7 +96,7 @@ object DecodedPosit {
     }
 
     def regime_biased: UInt = {
-      assert(target.regime +& (target.size - 2).S >= 0.S)
+      assert(!target.isSpe || target.regime +& (target.size - 2).S >= 0.S)
       (target.regime +& (target.size - 2).S).asUInt()
     } // max value is 2 * (width - 2) - 1 => 2 * width - 5
 
