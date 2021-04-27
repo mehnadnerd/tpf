@@ -21,6 +21,10 @@ object Posit {
     val regime = Wire(UInt((dp.size - 1).W))
     val regimebits = Wire(UInt(unsignedBitLength(dp.size - 1).W))
     val regimeexpfrac = Wire(UInt((dp.size - 1).W))
+    cover(dp.regime > 0.S, "COVER Regime encode gtz")
+    cover(dp.regime === 0.S, "COVER Regime encode eqz")
+    cover(dp.regime < 0.S, "COVER Regime encode ltz")
+
     when(dp.regime >= 0.S) {
       regimebits := dp.regime.asUInt()
       regime := (Cat(1.U(1.W), 0.U((dp.size - 2).W)).asSInt() >> (dp.regime).asUInt()).asUInt()
@@ -146,6 +150,8 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
   // for now, just decode
   dontTouch(x_dec)
   dontTouch(y_dec)
+  cover(decvalid, "COVER decvalid")
+
 
   // stage 2: multiply
   val mulvalid = RegNext(decvalid, init = false.B)
