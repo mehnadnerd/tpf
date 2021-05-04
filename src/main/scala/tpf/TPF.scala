@@ -159,7 +159,10 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
   val regimeexp_sum = RegNext(x_dec.regime_exp +& y_dec.regime_exp) // note: biased
   // max value is 2 * (2^es * (2 * width - 2) - 1)
   val sign_xor = RegNext(x_dec.sign ^ y_dec.sign)
+  cover(mulvalid &  sign_xor, "COVER mul negative")
+  cover(mulvalid & !sign_xor, "COVER mul positive")
   val mulzero = RegNext(x_dec.isZero | y_dec.isZero)
+  cover(mulvalid & mulzero, "COVER mul zero")
   val mulinf = RegNext(x_dec.isInf | y_dec.isInf) // could have both zero and inf, undefined output
 
   // stage 3: fixup
@@ -177,6 +180,8 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
   }.otherwise {
     right_bits_carried := Cat(right_bits, 0.U(1.W))
   }
+  cover(mulvalid &  left_bits(1), "COVER leftbits1 true") // indicates carry into regimexp
+  cover(mulvalid & !left_bits(1), "COVER leftbits1 false")
   val frac_sint = Wire(SInt())
   frac_sint := Cat(1.U(2.W), right_bits_carried).asSInt()
 
@@ -251,6 +256,9 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
 
   val regimecapped = Mux(shiftRegime > (size - 2).S, (size - 2).S,
     Mux(shiftRegime < (-(size - 2)).S, (-(size - 2)).S, shiftRegime))
+  cover(regimecapped > 0.S, "COVER Regime encode gtz")
+  cover(regimecapped === 0.S, "COVER Regime encode eqz")
+  cover(regimecapped < 0.S, "COVER Regime encode ltz")
   val expfrac = Wire(UInt((size - 0).W))
   expfrac := Cat(shiftExp, shiftFrac) // note: last bit is only for rounding
   val regimeencoded = Wire(UInt((size - 1).W))
