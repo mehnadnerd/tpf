@@ -58,7 +58,7 @@ object DecodedPosit {
     dp.sign := p.bits(p.size - 1)
     // TODO: what are we taking the two's complemetns of for negative numbers?
     val rest = Mux(dp.sign, Cat(~p.bits(p.size - 2, 0)) +% 1.U, p.bits(p.size - 2, 0))
-    val loz = p.bits(p.size - 2) // leading one or zero. if one, regime positive, zero regime negative
+    val loz = rest(p.size - 2) // leading one or zero. if one, regime positive, zero regime negative
     val rrest = chisel3.util.Reverse(rest)
 
     val clz = Util.clz(rrest)
@@ -100,7 +100,7 @@ object DecodedPosit {
     }
 
     def regime_biased: UInt = {
-      assert(!target.isSpe || target.regime +& (target.size - 2).S >= 0.S)
+      assert(target.isSpe || target.regime +& (target.size - 2).S >= 0.S)
       (target.regime +& (target.size - 2).S).asUInt()
     } // max value is 2 * (width - 2) - 1 => 2 * width - 5
 
