@@ -256,9 +256,9 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
 
   val regimecapped = Mux(shiftRegime > (size - 2).S, (size - 2).S,
     Mux(shiftRegime < (-(size - 2)).S, (-(size - 2)).S, shiftRegime))
-  cover(regimecapped > 0.S, "COVER Regime encode gtz")
-  cover(regimecapped === 0.S, "COVER Regime encode eqz")
-  cover(regimecapped < 0.S, "COVER Regime encode ltz")
+  cover(roundValid && regimecapped > 0.S, "COVER Regime encode gtz")
+  cover(roundValid && regimecapped === 0.S, "COVER Regime encode eqz")
+  cover(roundValid && regimecapped < 0.S, "COVER Regime encode ltz")
   val expfrac = Wire(UInt((size - 0).W))
   expfrac := Cat(shiftExp, shiftFrac) // note: last bit is only for rounding
   val regimeencoded = Wire(UInt((size - 1).W))
