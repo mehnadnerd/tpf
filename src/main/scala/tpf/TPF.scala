@@ -261,14 +261,15 @@ class TPF(size: Int = 32, es: Int = 2) extends Module {
   cover(roundValid && regimecapped < 0.S, "COVER Regime encode ltz")
   val expfrac = Wire(UInt((size - 0).W))
   expfrac := Cat(shiftExp, shiftFrac) // note: last bit is only for rounding
+  // I think top 2 bits are always zero, this is taken care of in regimebitlength
   val regimeencoded = Wire(UInt((size - 1).W))
   val regimebitlength = Wire(UInt(unsignedBitLength(size - 1).W)) // n.b. not actual bit length
   val regimeexpfrac = Wire(UInt((size - 1).W))
   val absregimecapped = Mux(shiftRegime >= 0.S, regimecapped.asUInt(), (0.S - regimecapped).asUInt())
-  regimebitlength := absregimecapped
+  regimebitlength := Mux(shiftRegime >= 0.S, regimecapped.asUInt(), ((-1).S - regimecapped).asUInt())
   when(shiftRegime >= 0.S) {
     regimeencoded := (Cat(1.U(1.W), 0.U((size - 2).W)).asSInt() >> (regimecapped).asUInt()).asUInt()
-  }.otherwise {
+  }.otherwise { // The Above is arithmetic shift, below is logical shift, don't use absregimecapped for speed
     regimeencoded := Cat(1.U(1.W), 0.U((size - 2).W)).asUInt() >> (0.S - regimecapped).asUInt()
   }
   val expfracMore = (Reverse(expfrac) << regimebitlength)(2 * size - 2, size).orR

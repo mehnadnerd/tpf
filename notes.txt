@@ -1,0 +1,73 @@
+posits good bad ugly https://hal.inria.fr/hal-01959581v3/document
+original paper http://www.johngustafson.net/pdfs/BeatingFloatingPoint.pdf
+hardware https://posithub.org/docs/iccd_submission_v1.pdf
+
+
+start at bit 244, go to bit 237
+00 +00
+f8 -08
+e0 -20
+b6 -4a
+a7 -59
+c7 -39
+e7 -19
+
+16 8 4 2 | 1 0.5 0.25 0.125
+
+00  00
+f8 -08
+d8 -28
+90 -70
+7e -82
+fe -02
+
+0.0
+-1.0
+-5.0
+-14.0
+-16.25
+-0.125
+
+0
+1
+2
+3
+1.5
+4
+
+Doing it at 16 bit to make easier
+
+bits 117-110
+
+32 16 8 4 | 2 1 0.5 0.25
+
+00
+fc -04 -1
+ec -14 -5
+c8 -38 -14
+bf -41 -16.25
+ff -01 -0.25
+
+
+
+for positive
+
+32 16 8 4 | 2 1 0.5 0.25
+
+00
+04
+14
+38
+41
+81
+
+0
+1
+5
+14
+16.25
+32.25
+
+01 is the regime for 0.25
+110 is the regime for 64
+10 is the regime for 4

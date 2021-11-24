@@ -15,40 +15,9 @@ import softfloat as sf
 # pn.toBinary()
 # print(pn)
 
-# this python thing has negative numbers wrong....
-
-b1 = [0x48000000,
-      0x44000000,
-      0x47000000,
-      0x70000000,
-      0x47000000
-      ]
-
-b2 = [0x28000000,
-      0x24000000,
-      0x27000000,
-      0x38000000,
-      0x27000000
-      ]
-
-p = [sp.posit32(bits=a) for a in b1]
-p2 = [sp.posit32(bits=a) for a in b2]
-
-accum = sp.posit32(bits=0)
-for i in range(len(p)):
-    print(str(p[i]) + " * " + str(p2[i]))
-    accum += p[i] * p2[i]
-print(accum)  # note: not at infinite precision
-print(accum.toHex())  # note: not at infinite precision
-
-waitline = "		@(posedge clock); #1;"
-line1 = "		io_in_data1 = 32'h{0}; // {1}"
-line2 = "		io_in_data2 = 32'h{0}; // {1}"
-
-verilog = False
-
-if verilog:
-    for i in range(len(p)):
-        print(line1.format(hex(b1[i]), str( p[i])))
-        print(line2.format(hex(b2[i]), str(p2[i])))
-        print(waitline)
+#b = [0xc0000000, 0xae000000, 0xa2000000, 0x9ff00000, 0xd8000000]
+b = [0xc000, 0xae00, 0xa200, 0x9ff0, 0xd800]
+#b = [0x4000, 0x5200, 0x5e00, 0x6010, 0x6408]
+p = [sp.posit32(bits=a * 0x10000) for a in b]
+for i in range(len(b)):
+    print(str(p[i]))
