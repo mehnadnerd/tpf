@@ -63,21 +63,24 @@ int main(int argc, char** argv, char** env) {
     dut->io_in_data2 = 0x0080;
     step(dut, m_trace, sim_time);
 
-    dut->io_in_valid = 1;
-    dut->io_in_data1 = 0x0001;
-    dut->io_in_data2 = 0x0001;
-    step(dut, m_trace, sim_time);
-
-    dut->io_in_valid = 1;
-    dut->io_in_data1 = 0x7f7f;
-    dut->io_in_data2 = 0x7f7f;
-    step(dut, m_trace, sim_time);
+//    dut->io_in_valid = 1;
+//    dut->io_in_data1 = 0x0001;
+//    dut->io_in_data2 = 0x0001;
+//    step(dut, m_trace, sim_time);
+//
+//    dut->io_in_valid = 1;
+//    dut->io_in_data1 = 0x7f7f;
+//    dut->io_in_data2 = 0x7f7f;
+//    step(dut, m_trace, sim_time);
 
 
     dut->io_in_valid = 0;
     step(dut, m_trace, sim_time);
 
+    dut->io_in_done = 1;
+    step(dut, m_trace, sim_time);
     dut->io_in_done = 0;
+    step(dut, m_trace, sim_time);
     step(dut, m_trace, sim_time);
     step(dut, m_trace, sim_time);
     step(dut, m_trace, sim_time);
