@@ -8,6 +8,7 @@ import chisel3.util._
 
 
 object Util {
+  // NOTE REQUIRES REVERSING
   def clz(x: Bits): SInt = {
     // horrifically unoptimised, please synthesis make this good
     // TODO: what happens when none?
