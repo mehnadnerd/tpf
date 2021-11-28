@@ -7,31 +7,27 @@ import chisel3.util._
 
 class Float(val size: Int = 32, val expBits: Int = 8) extends Bundle {
   val bits = UInt(size.W)
-
-  // derived things
-  // exponent, max bits = es
-  // fraction, max bits = size - 1 - 2 - es
 }
 
 object Float {
   def apply(dp: DecodedFloat): Float = {
     val p = Wire(new Float(dp.size, dp.expBits))
     // only used for debug so not done yet, hard part is denormals
-//    val expfrac = Cat(dp.exp, dp.frac)
-//    val regime = Wire(UInt((dp.size - 1).W))
-//    val regimebits = Wire(UInt(unsignedBitLength(dp.size - 1).W))
-//    val expfrac = Wire(UInt((dp.size - 1).W))
-//
-//    when(dp.regime >= 0.S) {
-//      regimebits := dp.regime.asUInt()
-//      regime := (Cat(1.U(1.W), 0.U((dp.size - 2).W)).asSInt() >> (dp.regime).asUInt()).asUInt()
-//    }.otherwise {
-//      regimebits := (0.S - dp.regime).asUInt()
-//      regime := Cat(1.U(1.W), 0.U((dp.size - 2).W)).asUInt() >> (0.S - dp.regime).asUInt()
-//    }
-//
-//    expfrac := regime | Cat(expfrac >> regimebits)
-//    p.bits := Cat(dp.sign, expfrac)
+    //    val expfrac = Cat(dp.exp, dp.frac)
+    //    val regime = Wire(UInt((dp.size - 1).W))
+    //    val regimebits = Wire(UInt(unsignedBitLength(dp.size - 1).W))
+    //    val expfrac = Wire(UInt((dp.size - 1).W))
+    //
+    //    when(dp.regime >= 0.S) {
+    //      regimebits := dp.regime.asUInt()
+    //      regime := (Cat(1.U(1.W), 0.U((dp.size - 2).W)).asSInt() >> (dp.regime).asUInt()).asUInt()
+    //    }.otherwise {
+    //      regimebits := (0.S - dp.regime).asUInt()
+    //      regime := Cat(1.U(1.W), 0.U((dp.size - 2).W)).asUInt() >> (0.S - dp.regime).asUInt()
+    //    }
+    //
+    //    expfrac := regime | Cat(expfrac >> regimebits)
+    //    p.bits := Cat(dp.sign, expfrac)
     p
   }
 }
@@ -45,7 +41,7 @@ class DecodedFloat(val size: Int = 32, val expBits: Int = 8) extends Bundle {
 
   val fracsize: Int = size - 1 - expBits
   val ieeebias: Int = (1 << (expBits - 1)) - 1
-  val denormbias: Int = fracsize - 1   // TODO: check??
+  val denormbias: Int = fracsize - 1 // TODO: check??
   val maxexpdist: Int = (((1 << expBits) - 1) + denormbias)
 }
 
@@ -66,10 +62,10 @@ object DecodedFloat {
     val denormalexp = dp.denormbias.U -& nlz
     val denormalfrac = rawfrac << (nlz.asUInt() + 1.U)
 
-    when (rawexp === 0.U) {
+    when(rawexp === 0.U) {
       dp.exp := denormalexp
       dp.frac := denormalfrac
-    } .otherwise {
+    }.otherwise {
       dp.exp := normalexp
       dp.frac := normalfrac
     }
@@ -140,7 +136,7 @@ class TIF(size: Int = 32, expBits: Int = 2) extends Module {
   val frac_prod = RegNext(Cat(1.U, x_dec.frac) * Cat(1.U, y_dec.frac)) // the 1.U are implicit one
   val exp_sum = RegNext(x_dec.exp +& y_dec.exp)
   val sign_xor = RegNext(x_dec.sign ^ y_dec.sign)
-  cover(mulvalid &  sign_xor, "COVER mul negative")
+  cover(mulvalid & sign_xor, "COVER mul negative")
   cover(mulvalid & !sign_xor, "COVER mul positive")
   val mulzero = RegNext(x_dec.isZero | y_dec.isZero)
   cover(mulvalid & mulzero, "COVER mul zero")
@@ -160,7 +156,7 @@ class TIF(size: Int = 32, expBits: Int = 2) extends Module {
   }.otherwise {
     right_bits_carried := Cat(right_bits, 0.U(1.W))
   }
-  cover(mulvalid &  left_bits(1), "COVER leftbits1 true") // indicates carry into exp
+  cover(mulvalid & left_bits(1), "COVER leftbits1 true") // indicates carry into exp
   cover(mulvalid & !left_bits(1), "COVER leftbits1 false")
   val frac_sint = Wire(SInt())
   frac_sint := Cat(1.U(2.W), right_bits_carried).asSInt()
@@ -180,10 +176,10 @@ class TIF(size: Int = 32, expBits: Int = 2) extends Module {
   dontTouch(mulout_zero)
 
   // min is exp
-  val quiresize = x_dec.maxexpdist + y_dec.maxexpdist // looks right size
+  val quiresize = x_dec.maxexpdist + y_dec.maxexpdist + 3 // looks right size
   val bitscanignore = 1 + x_dec.denormbias + y_dec.denormbias // these bits are always zero in fracaligned, so we don't have them
   // this is because at the smallest number, it is denormal and so these are all zero
-  
+
   val quire = RegInit(0.S(quiresize.W))
   //val quireInf = RegInit(0.U) // Disabled
   dontTouch(quire)
@@ -219,9 +215,9 @@ class TIF(size: Int = 32, expBits: Int = 2) extends Module {
   // start with 1 to ignore implicit 1
   // add 3 so have extra bits for rounding
 
-  val moreBits = (quireAbsReverse >> firstOne)(quiresize - 1, x_dec.fracsize + 4)
+  val moreBits = (quireAbsReverse >> firstOne) (quiresize - 1, x_dec.fracsize + 4)
 
-  val expraw = (quiresize - 1).U - firstOne // both ieee and deormal biased // TODO that true?
+  val expraw = (quiresize - 1).U - firstOne // both ieee and deormal biased
 
   val shiftValid = RegNext(done, init = false.B)
   val shiftFrac = RegNext(Reverse(fracbits))
@@ -234,20 +230,51 @@ class TIF(size: Int = 32, expBits: Int = 2) extends Module {
 
   val roundValid = RegNext(shiftValid, init = false.B)
 
-  // TODO: handle denormal output, rounding, zero
-//  val expcapped = Mux(shiftExp > (expB - 2).U, (size - 2).S,
-//    Mux(shiftRegime < (-(size - 2)).S, (-(size - 2)).S, shiftRegime))
-//  val expfracMore = (Reverse(expfrac) << regimebitlength)(2 * size - 2, size).orR
-//  val moreMore = shiftMore.orR | expfracMore
-//  val expfracshifted = expfrac >> regimebitlength
-//  val nextbit = expfracshifted(0)
-//  expfrac := regimeencoded | expfracshifted(size - 1, 1) // last bit is nextbit, so don't take it
-//  val expfracrounded = Mux(nextbit & (moreMore | expfrac(0)) & !expfrac.andR,
-//    expfrac +% 1.U ,expfrac)
-//  val refr = expfracrounded
-  val fracRounded = shiftFrac(x_dec.fracsize - 2, 2)
+  // TODO: handle denormal output, rounding
+  val biased_exp = shiftExp -& (x_dec.ieeebias + x_dec.denormbias + 2).U // biased with only one ieee and denorm bias // no idea where the 2 comes from
+  val flushable = shiftExp < (x_dec.ieeebias + x_dec.denormbias + 2).U
+  val shiftIsNormal = biased_exp > x_dec.denormbias.U // TODO check inclusive
 
-  val signedrefr = Cat(shiftSign, shiftExp, shiftFrac)
+  val unroundedExp = Wire(UInt(x_dec.expBits.W))
+  val unroundedFrac = Wire(UInt(x_dec.fracsize.W))
+  val unroundedExtra = Wire(UInt(3.W))
+
+  val denormalFracExt = Cat(1.U(1.W), shiftFrac)
+  val denormalFracShift = (denormalFracExt >> (x_dec.denormbias.U - biased_exp)) // TODO chceck
+
+  when(shiftIsNormal) {
+    unroundedExp := biased_exp - x_dec.denormbias.U
+    unroundedFrac := shiftFrac(x_dec.fracsize + 2, 3)
+    unroundedExtra := shiftFrac(2, 0)
+  }.otherwise {
+    // denormal
+    unroundedExp := 0.U
+    unroundedFrac := denormalFracShift(x_dec.fracsize + 2, 3) // TODO: idk if correct
+    unroundedExtra := denormalFracShift(2, 0)
+  }
+
+  val roundedExp = Wire(UInt())
+  val roundedFrac = Wire(UInt())
+  when(unroundedExtra(2)) {
+    // round up
+    roundedFrac := unroundedFrac +% 1.U // will handle the carry fine
+    when(unroundedFrac.andR()) {
+      roundedExp := unroundedExp +% 1.U // overflow to inf is not hadled
+    }.otherwise {
+      roundedExp := unroundedExp
+    }
+  }.otherwise {
+    // don't round up
+    roundedExp := unroundedExp
+    roundedFrac := unroundedFrac
+  }
+
+  when(shiftZero || flushable) {
+    roundedExp := 0.U
+    roundedFrac := 0.U
+  }
+
+  val signedrefr = Cat(shiftSign, roundedExp, roundedFrac)
   // stage x+3: output
   val outlatch = RegNext(signedrefr)
   val outvalid = RegNext(roundValid, init = false.B)
